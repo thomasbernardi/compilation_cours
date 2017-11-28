@@ -1,0 +1,9 @@
+*.pdf
+*.class
+/colorisation/out
+/colorisation/.idea
+/analyse_syntaxique/AST/.idea
+/analyse_syntaxique/.idea
+/analyse_syntaxique/googleNeedful
+/analyse_syntaxique/AST/out
+.DS_Store
