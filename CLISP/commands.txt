@@ -1,0 +1,33 @@
+defun
+loop
+  for
+if
+while ?
+collect ?
+
+progn
+function call
+
+arithmetic
+  +
+  -
+  *
+  /
+comparisons
+  <
+  >
+  =
+  equal
+or
+
+labels
+lambda
+
+cons
+car
+cdr
+append
+list
+
+
+(if (or (eq 5 2) (eq 50 50)))
