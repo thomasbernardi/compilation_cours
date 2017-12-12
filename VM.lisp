@@ -35,9 +35,13 @@
             (equal name :JGE)
             (equal name :JLE)
             (equal name :JMP)
-            (equal name :JSR))
+            (equal name :JNE))
             (cons name (gethash (car (cdr instruction)) (get vm :label-table)))
-            instruction)) (car instruction) instruction))))
+            (if (equal name :JSR)
+              (if (gethash (car (cdr instruction)) (get vm :label-table))
+                (cons name (gethash (car (cdr instruction)) (get vm :label-table)))
+                (cons :LSPFN (cdr instruction)))
+                instruction))) (car instruction) instruction))))
       ;looks for all appearances of "label" and adds label/address paire
       ;to label-table
       (set-label (instruction counter)
@@ -142,6 +146,16 @@
     (jump vm address))
     (vm-pop vm)))
 
+(defun vm-lisp-function (vm name)
+  (labels (
+    (add-argument (parameters remaining)
+      (if (< 0 remaining)
+        (add-argument (append parameters (list (get-memory vm
+            (- (get-register vm :FP) remaining)))) (- remaining 1))
+        parameters
+      )))
+      (add-argument (list 'funcall (list 'function name)) (get-memory vm (get-register vm :FP)))))
+
 (defun vm-compare (vm left right)
   (vm-compare-im vm (get-register vm left) right))
 
@@ -173,6 +187,10 @@
   (if (or (get-register vm :FLT) (get-register vm :FEQ))
     (vm-jump vm label)))
 
+(defun vm-jump-neq (vm label)
+  (if (or (get-register vm :FGT) (get-register vm :FLT))
+    (vm-jump vm label)))
+
 (defun vm-run (vm)
   (setf halt? nil)
   (loop while (not halt?) do
@@ -190,9 +208,9 @@
           ;we could be storing a tree in the register
           (move vm (car (cdr instruction)) (car (cdr (cdr instruction)))))))
     (:LOAD
-      (vm-load vm (car (cdr instruction)) (car (cdr (cdr instruction)))))
+      (vm-load vm (get-register vm (car (cdr instruction))) (car (cdr (cdr instruction)))))
     (:STORE
-      (vm-store vm (car (cdr instruction)) (car (cdr (cdr instruction)))))
+      (vm-store vm (get-register vm (car (cdr (cdr instruction)))) (car (cdr instruction))))
     (:INCR
       (increment vm (car (cdr instruction))))
     (:DECR
@@ -245,6 +263,8 @@
       (vm-jump-geq vm (car (cdr instruction))))
     (:JLE
       (vm-jump-leq vm (car (cdr instruction))))
+    (:JNE
+      (vm-jump-neq vm (car (cdr instruction))))
     (:JMP
       (vm-jump vm (car (cdr instruction))))
     (:JSR
@@ -261,3 +281,13 @@
       (vm-car vm (car (cdr instruction))))
     (:CDR
       (vm-cdr vm (car (cdr instruction))))))
+
+(defun lisp-function-call (vm function)
+  (vm-push-im vm 1)
+  (vm-push-im vm 2)
+  (vm-push-im vm 3)
+  (vm-push-im vm 4)
+  (vm-push-im vm 5)
+  (vm-push-im vm 5)
+  (set-register vm :FP 5)
+  (vm-lisp-function vm function))
