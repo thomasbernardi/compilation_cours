@@ -7,5 +7,6 @@
 (:MULT (:CONST 5) :R0)
 (:ADD (:CONST 1) :R1)
 (:JMP :LOOP)
+(:JSR quit)
 (:LABEL :END)
 (:HALT)
