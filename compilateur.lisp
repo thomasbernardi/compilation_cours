@@ -1,6 +1,9 @@
 ;Result of a recursive call should always be found in :R0
 ;first parameter of a function is pushed onto stack first
 
+;TODO: redesign env to include 2 separate association lists, one for current scope,
+;one for parent scope--define function to check for association--new list will also
+;be used to build stack frame with variables
 ;@returns a list of commands
 (defun comp-expr (expr env)
   (cond
@@ -8,7 +11,10 @@
       (if (constantp expr)
         (command-binary :MOVE (list :CONST expr) :R0)
         (if (assoc expr env)
-          (param-addr (cdr (assoc expr env)))
+          (append
+            (param-addr (cdr (assoc expr env)))
+            (command-binary :MOVE :R0 :R1)
+            (command-binary :LOAD :R0 :R1))
           (warn "unrecognized symbol"))))
     ((equal 'if (car expr)) (if-statement expr env))
     (T (warn "no case followed"))))
@@ -24,8 +30,12 @@
 
 ;pre: offset is the integer offset of a parameter of interest
 (defun param-addr (offset)
-  (append '((:MOVE :FP :R0))
-    (list (list :ADD (list :CONST offset) :R0))))
+  (append
+    (command-binary :MOVE :FP :R0)
+    (command-binary :ADD (command-unary :CONST offset) :R0)))
+
+(defun literal (expr env)
+  (command :MOVE expr :R0))
 
 (defun if-statement (expr env)
   ((lambda (etiq-else etiq-after)
@@ -69,6 +79,7 @@
       ('/ :DIV))
       :R1 :R0)))
 
+;for lambda/labels, add different way to move parameters from old frame to new frame
 (defun function-call (expr env)
   (labels
     ((next-arg (expr env)
@@ -96,7 +107,8 @@
     (command-binary :MOVE :R2 :SP)))
     (list-length (cdr expr)))))
 
-(defun defun-def (expr env)
+;expr format: (name params rest)
+(defun function-def (expr env)
   (labels
     ((next-expr (rest-exprs env commands)
       (if (null rest-exprs)
@@ -106,12 +118,31 @@
           env
           (append commands (comp-expr (car rest-exprs) env))))))
     (next-expr
-      (cdr (cdr (cdr expr)))
-      (make-env (car (cdr (cdr expr))))
-      (command-unary :LABEL (car (cdr expr))))))
+      (cdr (cdr expr))
+      (make-env (car (cdr expr)))
+      (command-unary :LABEL (car expr)))))
 
+(defun defun-def (expr env)
+  (function-def (cdr expr) env))
+
+;TODO
+;function call, label, definition
+;modify function-call, add list of higher scope parameters at end of parameter list
 (defun lambda-def (expr env)
+  ((lambda (expr env)
+    (append
+      (function-call expr env)
+      (function-def expr env)))
+    ((append
+      (list gensym)
+      (cdr expr))
+        env)))
+
+(defun labels-def (expr env)
   )
+
+(defun labels-function-def (expr env)
+  (function-def (expr env)))
 
 (defun make-env (params)
   (labels
@@ -123,3 +154,8 @@
           (acons (car rest-params) count env)
           (+ count 1)))))
     (add-variable params nil 1)))
+
+(defun in-env (env key)
+  (or
+    (assoc key (cdr (car env))))
+    (assoc key (cdr env)))
