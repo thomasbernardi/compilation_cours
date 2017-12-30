@@ -4,6 +4,7 @@
 ;TODO: redesign env to include 2 separate association lists, one for current scope,
 ;one for parent scope--define function to check for association--new list will also
 ;be used to build stack frame with variables
+
 ;@returns a list of commands
 (defun comp-expr (expr env)
   (cond
@@ -12,8 +13,11 @@
         (command-binary :MOVE (list :CONST expr) :R0)
         (if (assoc expr env)
           (append
+            ;put address in :R0
             (param-addr (cdr (assoc expr env)))
+            ;move address to :R1
             (command-binary :MOVE :R0 :R1)
+            ;load contents of address into :R0
             (command-binary :LOAD :R0 :R1))
           (warn "unrecognized symbol"))))
     ((equal 'if (car expr)) (if-statement expr env))
@@ -128,15 +132,15 @@
 ;TODO
 ;function call, label, definition
 ;modify function-call, add list of higher scope parameters at end of parameter list
-(defun lambda-def (expr env)
-  ((lambda (expr env)
-    (append
-      (function-call expr env)
-      (function-def expr env)))
-    ((append
-      (list gensym)
-      (cdr expr))
-        env)))
+; (defun lambda-def (expr env)
+;   ((lambda (expr env)
+;     (append
+;       (function-call expr env)
+;       (function-def expr env)))
+;     (append
+;       (list gensym)
+;       (cdr expr))
+;         env))
 
 (defun labels-def (expr env)
   )
@@ -144,16 +148,20 @@
 (defun labels-function-def (expr env)
   (function-def (expr env)))
 
-(defun make-env (params)
+;((current-assoc-list) (parent-assoc-list) (env-assoc-list))
+(defun make-env (params parent-env)
   (labels
-    ((add-variable (rest-params env count)
+    ((add-variable (rest-params count env)
       (if (null rest-params)
         env
         (add-variable
           (cdr rest-params)
-          (acons (car rest-params) count env)
-          (+ count 1)))))
-    (add-variable params nil 1)))
+          (+ 1 count)
+          (acons (car rest-params) count env)))))
+    ((lambda (current parent)
+      (list current parent (append current parent)))
+      (add-variable params (+ 1 (length (car (cdr (cdr parent-env))))) nil)
+      (car (cdr (cdr parent-env))))))
 
 (defun in-env (env key)
   (or
