@@ -11,14 +11,14 @@
     ((atom expr)
       (if (constantp expr)
         (command-binary :MOVE (list :CONST expr) :R0)
-        (if (assoc expr env)
+        (if (in-env expr env)
           (append
             ;put address in :R0
-            (param-addr (cdr (assoc expr env)))
+            (param-addr (cdr (in-env expr env)))
             ;move address to :R1
             (command-binary :MOVE :R0 :R1)
             ;load contents of address into :R0
-            (command-binary :LOAD :R0 :R1))
+            (command-binary :LOAD :R1 :R0))
           (warn "unrecognized symbol"))))
     ((equal 'if (car expr)) (if-statement expr env))
     (T (warn "no case followed"))))
@@ -35,7 +35,9 @@
 ;pre: offset is the integer offset of a parameter of interest
 (defun param-addr (offset)
   (append
-    (command-binary :MOVE :FP :R0)
+    (command-binary :MOVE :FP :R0) ;get FP
+    (command-binary :LOAD :FP :R1) ;get nargs
+    (command-binary :SUB :R1 :R0)
     (command-binary :ADD (command-unary :CONST offset) :R0)))
 
 (defun literal (expr env)
@@ -84,18 +86,35 @@
       :R1 :R0)))
 
 ;for lambda/labels, add different way to move parameters from old frame to new frame
+;expr format: (name . (args))
 (defun function-call (expr env)
   (labels
-    ((next-arg (expr env)
-    (if (null expr)
-      nil
-      (append
-      (comp-expr (car expr) env)
-      (command-unary :PUSH :R0)
-      (next-arg (cdr expr) env)))))
+    ((next-arg (expr env instructions)
+      (if (null expr)
+        instructions
+        (next-arg
+          (cdr expr)
+          env
+          (append
+            instructions
+            (comp-expr (car expr) env)
+            (command-unary :PUSH :R0)))))
+    (parent-args (count max instructions)
+      (if (< max count)
+        instructions
+        (parent-args
+          (+ 1 count)
+          max
+          (append
+            instructions
+            (param-addr count)
+            (command-binary :MOVE :R0 :R1)
+            (command-binary :LOAD :R1 :R0)
+            (command-unary :PUSH :R0))))))
   ((lambda (nargs)
     (append
-    (next-arg (cdr expr) env)
+    (parent-args 1 (length (parent-scope env)) nil)
+    (next-arg (cdr expr) env nil)
     (command-unary :PUSH (list :CONST nargs))
     (command-binary :MOVE :FP :R1)
     (command-binary :MOVE :SP :FP)
@@ -109,7 +128,7 @@
     (command-unary :POP :R2)
     (command-binary :MOVE :R1 :FP)
     (command-binary :MOVE :R2 :SP)))
-    (list-length (cdr expr)))))
+    (length (cdr expr)))))
 
 ;expr format: (name params rest)
 (defun function-def (expr env)
@@ -160,10 +179,18 @@
           (acons (car rest-params) count env)))))
     ((lambda (current parent)
       (list current parent (append current parent)))
-      (add-variable params (+ 1 (length (car (cdr (cdr parent-env))))) nil)
+      ;zero index param offsets
+      (add-variable params (length (current-scope parent-env)) nil)
       (car (cdr (cdr parent-env))))))
 
-(defun in-env (env key)
-  (or
-    (assoc key (cdr (car env))))
-    (assoc key (cdr env)))
+(defun in-env (key env)
+  (assoc key (car (cdr (cdr env)))))
+
+(defun parent-scope (env)
+  (car (cdr env)))
+
+(defun child-scope (env)
+  (car env))
+
+(defun current-scope (env)
+  (car (cdr (cdr env))))
