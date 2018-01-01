@@ -7,10 +7,9 @@
 
 ;@returns a list of commands
 (defun comp-expr (expr env)
-  (cond
-    ((atom expr)
-      (if (constantp expr)
-        (command-binary :MOVE (list :CONST expr) :R0)
+  (if (atom expr)
+    (if (constantp expr)
+      (command-binary :MOVE (list :CONST expr) :R0)
         (if (in-env expr env)
           (append
             ;put address in :R0
@@ -19,9 +18,11 @@
             (command-binary :MOVE :R0 :R1)
             ;load contents of address into :R0
             (command-binary :LOAD :R1 :R0))
-          (warn "unrecognized symbol"))))
-    ((equal 'if (car expr)) (if-statement expr env))
-    (T (warn "no case followed"))))
+            (warn "unrecognized symbol")))
+    (if (equal 'if (car expr))
+      (if-statement expr env)
+    ;(warn "no case followed")
+      (command-unary :UNKNOWNEXPR expr))))
 
 (defun create-label (etiq)
   (list (append (list :LABEL) (list etiq))))
@@ -130,7 +131,7 @@
     (command-binary :MOVE :R2 :SP)))
     (length (cdr expr)))))
 
-;expr format: (name params rest)
+;expr format: (name (params) instructions)
 (defun function-def (expr env)
   (labels
     ((next-expr (rest-exprs env commands)
@@ -140,32 +141,56 @@
           (cdr rest-exprs)
           env
           (append commands (comp-expr (car rest-exprs) env))))))
-    (next-expr
-      (cdr (cdr expr))
-      (make-env (car (cdr expr)))
-      (command-unary :LABEL (car expr)))))
+    (append
+      (next-expr
+        (cdr (cdr expr))
+        (make-env (car (cdr expr)) env)
+        (command-unary :LABEL (car expr)))
+      (list (list :RTN)))))
 
+;expr format (defun name params)
 (defun defun-def (expr env)
   (function-def (cdr expr) env))
 
-;TODO
-;function call, label, definition
-;modify function-call, add list of higher scope parameters at end of parameter list
-; (defun lambda-def (expr env)
-;   ((lambda (expr env)
-;     (append
-;       (function-call expr env)
-;       (function-def expr env)))
-;     (append
-;       (list gensym)
-;       (cdr expr))
-;         env))
+;expr format: ((lambda (args) instructions) params)
+(defun lambda-def (expr env)
+  ((lambda (def params env end)
+    (append
+      (function-call (append (list (car def)) params) env)
+      (command-unary :JMP end)
+      (function-def def env)
+      (command-unary :LABEL end)))
+    (append
+      (list (gensym))
+      (cdr (car expr)))
+    (cdr expr)
+    env
+    (gensym)))
 
+;expr format: (labels (functions) instructions)
 (defun labels-def (expr env)
-  )
+  (labels
+    ((fun-exprs (rest-exprs env commands)
+      (if (null rest-exprs)
+        commands
+        (fun-exprs
+          (cdr rest-exprs)
+          env
+          (append commands (labels-function-def (car rest-exprs) env)))))
+    (inst-exprs (rest-exprs env commands)
+      (if (null rest-exprs)
+        commands
+        (inst-exprs
+          (cdr rest-exprs)
+          env
+          (append commands (comp-expr (car rest-exprs) env))))))
+    (append
+      (fun-exprs (car (cdr expr)) env nil)
+      (inst-exprs (cdr (cdr expr)) env nil))))
 
+;expr format: (name params)
 (defun labels-function-def (expr env)
-  (function-def (expr env)))
+  (function-def expr env))
 
 ;((current-assoc-list) (parent-assoc-list) (env-assoc-list))
 (defun make-env (params parent-env)
