@@ -154,7 +154,7 @@
             (- (get-register vm :FP) remaining)))) (- remaining 1))
         parameters
       )))
-      (apply name (add-argument nil (get-memory vm (get-register vm :FP))))))
+      (set-register vm :R0 (apply name (add-argument nil (get-memory vm (get-register vm :FP)))))))
 
 (defun vm-compare (vm left right)
   (vm-compare-im vm (get-register vm left) right))
