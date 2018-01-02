@@ -83,7 +83,7 @@
       ) etiq))))
 
 ;expr format: (operator x1 x2)
-(defun arith-op (expr env)
+(defun arith-op (expr parent-env)
   (labels
     ((extra-operands (operands operator env commands)
       (if (null operands)
@@ -101,12 +101,12 @@
             (command-binary operator :R1 :R0)))))
       (genargs (count args)
         (if (= count 0)
-          (cons (make-env args env) args)
+          (cons (make-env args parent-env) args)
           (genargs (- count 1) (append args (list (gensym)))))))
       ;params format (env . parameters)
       ((lambda (operator name end params)
         (append
-          (function-call (append (list name) (cdr expr)) (car params))
+          (function-call (append (list name) (cdr expr)) parent-env)
           (command-unary :JMP end)
           (command-unary :LABEL name)
           (param-addr (cdr (in-env (car (cdr params)) (car params))))
@@ -133,12 +133,11 @@
 ;expr format: (name . (args))
 (defun function-call (expr env)
   (labels
-    ((next-arg (expr env instructions)
+    ((next-arg (expr instructions)
       (if (null expr)
         instructions
         (next-arg
           (cdr expr)
-          env
           (append
             instructions
             (comp-expr (car expr) env)
@@ -158,7 +157,7 @@
   ((lambda (nargs)
     (append
     (parent-args 1 (length (parent-scope env)) nil)
-    (next-arg (cdr expr) env nil)
+    (next-arg (cdr expr) nil)
     (command-unary :PUSH (list :CONST nargs))
     (command-binary :MOVE :FP :R1)
     (command-binary :MOVE :SP :FP)
