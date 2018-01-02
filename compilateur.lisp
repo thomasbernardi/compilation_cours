@@ -21,8 +21,14 @@
             (warn "unrecognized symbol")))
     (if (equal 'if (car expr))
       (if-statement expr env)
-    ;(warn "no case followed")
-      (command-unary :UNKNOWNEXPR expr))))
+      (if (or
+        (equal '+ (car expr))
+        (equal '- (car expr))
+        (equal '* (car expr))
+        (equal '/ (car expr)))
+        (arith-op expr env)
+        ;(warn "no case followed")
+        (command-unary :UNKNOWNEXPR expr)))))
 
 (defun create-label (etiq)
   (list (append (list :LABEL) (list etiq))))
@@ -32,8 +38,11 @@
 
 (defun command-unary (command arg)
   (list (list command arg)))
+(defun return-command ()
+  (list (list :RTN)))
 
 ;pre: offset is the integer offset of a parameter of interest
+;ATTN modifies :R1 !!!!!
 (defun param-addr (offset)
   (append
     (command-binary :MOVE :FP :R0) ;get FP
@@ -73,18 +82,52 @@
       ('= :JNE)
       ) etiq))))
 
+;expr format: (operator x1 x2)
 (defun arith-op (expr env)
-  (append
-    (comp-expr (car (cdr (cdr expr))) env) ;flip order between lisp order and assembly order
-    '((:MOVE :R0 :R1))
-    (comp-expr (car (cdr expr)) env)
-    (command-binary
-    (case (car expr)
-      ('+ :ADD)
-      ('- :SUB)
-      ('* :MULT)
-      ('/ :DIV))
-      :R1 :R0)))
+  (labels
+    ((extra-operands (operands operator env commands)
+      (if (null operands)
+        commands
+        (extra-operands
+          (cdr operands)
+          operator
+          env
+          (append
+            commands
+            (command-binary :MOVE :R0 :R2)
+            (param-addr (cdr (in-env (car operands) env)))
+            (command-binary :LOAD :R0 :R1)
+            (command-binary :MOVE :R2 :R0)
+            (command-binary operator :R1 :R0)))))
+      (genargs (count args)
+        (if (= count 0)
+          (cons (make-env args env) args)
+          (genargs (- count 1) (append args (list (gensym)))))))
+      ;params format (env . parameters)
+      ((lambda (operator name end params)
+        (append
+          (function-call (append (list name) (cdr expr)) (car params))
+          (command-unary :JMP end)
+          (command-unary :LABEL name)
+          (param-addr (cdr (in-env (car (cdr params)) (car params))))
+          (command-binary :MOVE :R0 :R1)
+          (command-binary :LOAD :R1 :R0)
+          (extra-operands
+            (cdr (cdr params))
+            operator
+            (car params)
+            nil)
+          (return-command)
+          (command-unary :LABEL end)))
+        (case (car expr)
+          ('+ :ADD)
+          ('- :SUB)
+          ('* :MULT)
+          ('/ :DIV))
+        (gensym)
+        (gensym)
+        (genargs (length (cdr expr)) nil))))
+
 
 ;for lambda/labels, add different way to move parameters from old frame to new frame
 ;expr format: (name . (args))
@@ -146,7 +189,7 @@
         (cdr (cdr expr))
         (make-env (car (cdr expr)) env)
         (command-unary :LABEL (car expr)))
-      (list (list :RTN)))))
+      (return-command))))
 
 ;expr format (defun name params)
 (defun defun-def (expr env)
@@ -209,7 +252,7 @@
       (car (cdr (cdr parent-env))))))
 
 (defun in-env (key env)
-  (assoc key (car (cdr (cdr env)))))
+  (assoc key (current-scope env)))
 
 (defun parent-scope (env)
   (car (cdr env)))
