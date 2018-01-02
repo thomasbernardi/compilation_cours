@@ -154,7 +154,7 @@
             (- (get-register vm :FP) remaining)))) (- remaining 1))
         parameters
       )))
-      (add-argument (list 'funcall (list 'function name)) (get-memory vm (get-register vm :FP)))))
+      (apply name (add-argument nil (get-memory vm (get-register vm :FP))))))
 
 (defun vm-compare (vm left right)
   (vm-compare-im vm (get-register vm left) right))
