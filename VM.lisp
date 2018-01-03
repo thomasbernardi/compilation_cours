@@ -162,7 +162,7 @@
 (defun vm-compare-im (vm value right)
   ((lambda (left-value right-value)
     (set-register vm :FLT (< left-value right-value))
-    (set-register vm :FEQ (= left-value right-value))
+    (set-register vm :FEQ (or (= left-value right-value) (equal left-value right-value)))
     (set-register vm :FGT (> left-value right-value)))
   value
   (get-register vm right)))

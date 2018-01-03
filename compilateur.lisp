@@ -38,49 +38,88 @@
 
 (defun command-unary (command arg)
   (list (list command arg)))
+
+(defun const (constant)
+  (list :CONST constant))
 (defun return-command ()
   (list (list :RTN)))
 
 ;pre: offset is the integer offset of a parameter of interest
-;ATTN modifies :R1 !!!!!
+;ATTN modifies :R5 !!!!!
 (defun param-addr (offset)
   (append
     (command-binary :MOVE :FP :R0) ;get FP
-    (command-binary :LOAD :FP :R1) ;get nargs
-    (command-binary :SUB :R1 :R0)
-    (command-binary :ADD (command-unary :CONST offset) :R0)))
+    (command-binary :LOAD :FP :R5) ;get nargs
+    (command-binary :SUB :R5 :R0)
+    (command-binary :ADD (const offset) :R0)))
 
 (defun literal (expr env)
   (command :MOVE expr :R0))
 
+;expr format: (if (condition) then otherwise)
 (defun if-statement (expr env)
-  ((lambda (etiq-else etiq-after)
-    (append (conditional-jump expr env etiq-else)
+  ((lambda (etiq-otherwise etiq-end)
+    (append
+      (conditional-jump (car (cdr expr)) env etiq-otherwise)
       (comp-expr (car (cdr (cdr expr))) env)
-      (command-unary :JMP etiq-after)
-      (create-label etiq-else)
+      (command-unary :JMP etiq-end)
+      (create-label etiq-otherwise)
       (comp-expr (car (cdr (cdr (cdr expr)))) env)
-      (create-label etiq-after))) (gensym) (gensym)))
+      (create-label etiq-end))) (gensym) (gensym)))
 
 ;TODO other conditions besides < > =
 ; any other boolean evaluation
 ; or statement
-;currently jumps if NOT < > =
+;currently jumps if NOT < > = (jumps when condition is NOT true)
+;expr format ((< | > | =) a b) | (or expr*) | (function-call)
 (defun conditional-jump (expr env etiq)
   (labels (
-    (handle-or (expr env etiq-else etiq-then)
-      )))
-  (if (equal 'or (car (cdr expr)))
-    )
-  (append (comp-expr (car (cdr (car (cdr expr)))) env) '((:MOVE :R0 :R1))
-    (comp-expr (car (cdr (cdr (car (cdr expr))))) env) '((:MOVE :R0 :R2))
-    '((:CMP :R1 :R2)) (list (list
-      (case (car (car (cdr expr)))
-      ('> :JLE)
-      ;(comp-expr expr1) (:MOVE :R0 :R1) (comp-expr expr2) (:MOVE :R0 :R2) (:CMP :R1 :R2)
-      ('< :JGE)
-      ('= :JNE)
-      ) etiq))))
+    (eval-expression (expr env etiq)
+      (if (or
+        (equal (car expr) '<)
+        (equal (car expr) '>)
+        (equal (car expr) '=))
+        (append
+          (comp-expr (car (cdr expr)) env)
+          (command-binary :MOVE :R0 :R1)
+          (comp-expr (car (cdr (cdr expr))) env)
+          (command-binary :MOVE :R0 :R2)
+          (command-binary :CMP :R1 :R2)
+          (command-unary
+            (case (car expr)
+              ('> :JLE)
+              ('< :JGE)
+              ('= :JNE))
+            etiq))
+        (if (equal (car expr) 'or)
+          ((lambda (if-true)
+            (append
+              (handle-or (cdr expr) env if-true nil)
+              (command-unary :JMP etiq)
+              (command-unary :LABEL if-true)))
+              (gensym))
+          (append
+            (comp-expr expr)
+            (command-binary :MOVE :R0 :R1)
+            (command-binary :MOVE (const nil) :R2)
+            (command-binary :CMP :R1 :R2)
+            (command-binary :JEQ etiq)))))
+    ;expr format: (condition*)
+    (handle-or (expr env if-true commands)
+      (if (null expr)
+        commands
+        ((lambda (next-etiq)
+          (handle-or
+            (cdr expr)
+            env
+            if-true
+            (append
+              commands
+              (eval-expression (car expr) env next-etiq)
+              (command-unary :JMP if-true)
+              (command-unary :LABEL next-etiq))))
+          (gensym)))))
+    (eval-expression expr env etiq)))
 
 ;expr format: (operator x1 x2)
 (defun arith-op (expr parent-env)
