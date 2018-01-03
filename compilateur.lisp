@@ -18,7 +18,7 @@
             (command-binary :MOVE :R0 :R1)
             ;load contents of address into :R0
             (command-binary :LOAD :R1 :R0))
-            (warn "unrecognized symbol")))
+            (command-unary :UNKNOWNSYM expr)))
     (if (equal 'if (car expr))
       (if-statement expr env)
       (if (or
@@ -101,7 +101,7 @@
             (command-binary operator :R1 :R0)))))
       (genargs (count args)
         (if (= count 0)
-          (cons (make-env args parent-env) args)
+          (cons (make-env args parent-env nil) args)
           (genargs (- count 1) (append args (list (gensym)))))))
       ;params format (env . parameters)
       ((lambda (operator name end params)
@@ -154,24 +154,31 @@
             (command-binary :MOVE :R0 :R1)
             (command-binary :LOAD :R1 :R0)
             (command-unary :PUSH :R0))))))
-  ((lambda (nargs)
+  ((lambda (nargs instructions)
     (append
-    (parent-args 1 (length (parent-scope env)) nil)
-    (next-arg (cdr expr) nil)
-    (command-unary :PUSH (list :CONST nargs))
-    (command-binary :MOVE :FP :R1)
-    (command-binary :MOVE :SP :FP)
-    (command-binary :MOVE :SP :R2)
-    (command-binary :SUB (list :CONST nargs) :R2)
-    (command-unary :DECR :R2)
-    (command-unary :PUSH :R2)
-    (command-unary :PUSH :R1)
-    (command-unary :JSR (car expr))
-    (command-unary :POP :R1)
-    (command-unary :POP :R2)
-    (command-binary :MOVE :R1 :FP)
-    (command-binary :MOVE :R2 :SP)))
-    (length (cdr expr)))))
+      instructions
+      (next-arg (cdr expr) nil)
+      (command-unary :PUSH (list :CONST nargs))
+      (command-binary :MOVE :FP :R1)
+      (command-binary :MOVE :SP :FP)
+      (command-binary :MOVE :SP :R2)
+      (command-binary :SUB (list :CONST nargs) :R2)
+      (command-unary :DECR :R2)
+      (command-unary :PUSH :R2)
+      (command-unary :PUSH :R1)
+      (command-unary :JSR (car expr))
+      (command-unary :POP :R1)
+      (command-unary :POP :R2)
+      (command-binary :MOVE :R1 :FP)
+      (command-binary :MOVE :R2 :SP)))
+    (+
+      (length (cdr expr))
+      (if (member (car expr) (child-function-scope env))
+        (length (current-scope env))
+        0))
+    (if (member (car expr) (child-function-scope env))
+      (parent-args 1 (length (current-scope env)) nil)
+      nil))))
 
 ;expr format: (name (params) instructions)
 (defun function-def (expr env)
@@ -186,7 +193,7 @@
     (append
       (next-expr
         (cdr (cdr expr))
-        (make-env (car (cdr expr)) env)
+        (make-env (car (cdr expr)) env (cdr (cdr expr)))
         (command-unary :LABEL (car expr)))
       (return-command))))
 
@@ -234,8 +241,8 @@
 (defun labels-function-def (expr env)
   (function-def expr env))
 
-;((current-assoc-list) (parent-assoc-list) (env-assoc-list))
-(defun make-env (params parent-env)
+;((child-assoc-list) (parent-assoc-list) (current-assoc-list) (child-functions-list))
+(defun make-env (params parent-env instructions)
   (labels
     ((add-variable (rest-params count env)
       (if (null rest-params)
@@ -243,9 +250,25 @@
         (add-variable
           (cdr rest-params)
           (+ 1 count)
-          (acons (car rest-params) count env)))))
+          (acons (car rest-params) count env))))
+    (add-functions (labels-def functions)
+      (if (null labels-def)
+        functions
+        (add-functions
+          (cdr labels-def)
+          (append functions (list (car (car labels-def)))))))
+    (child-functions (rest-instructions functions)
+      (if (null rest-instructions)
+        functions
+        (child-functions
+          (cdr instructions)
+          (if (and
+              (listp (car rest-instructions))
+              (equal (car (car rest-instructions)) 'labels))
+            (append functions (add-functions (car (cdr (car rest-instructions))) nil))
+            functions)))))
     ((lambda (current parent)
-      (list current parent (append current parent)))
+      (list current parent (append current parent) (child-functions instructions nil)))
       ;zero index param offsets
       (add-variable params (length (current-scope parent-env)) nil)
       (car (cdr (cdr parent-env))))))
@@ -261,3 +284,6 @@
 
 (defun current-scope (env)
   (car (cdr (cdr env))))
+
+(defun child-function-scope (env)
+  (car (cdr (cdr (cdr env)))))
