@@ -41,9 +41,28 @@
 
 (defun const (constant)
   (list :CONST constant))
+
 (defun return-command ()
   (list (list :RTN)))
 
+;expr format: (car sous-expr)
+(defun car-command (expr env)
+  (append
+    (comp-expr (cdr expr) env)
+    (command-unary :CAR :R0)))
+
+(defun cdr-command (expr env)
+  (append
+    (comp-expr (cdr expr) env)
+    (command-unary :CDR :R0)))
+
+(defun cons-command (expr env)
+  (append
+    (comp-expr (cdr expr) env)
+    (command-unary :PUSH :R0)
+    (comp-expr (cdr (cdr expr)) env)
+    (command-unary :POP :R1)
+    (command-binary :CAR :R1 :R0)))
 ;pre: offset is the integer offset of a parameter of interest
 ;ATTN modifies :R5 !!!!!
 (defun param-addr (offset)
@@ -67,9 +86,6 @@
       (comp-expr (car (cdr (cdr (cdr expr)))) env)
       (create-label etiq-end))) (gensym) (gensym)))
 
-;TODO other conditions besides < > =
-; any other boolean evaluation
-; or statement
 ;currently jumps if NOT < > = (jumps when condition is NOT true)
 ;expr format ((< | > | =) a b) | (or expr*) | (function-call)
 (defun conditional-jump (expr env etiq)
@@ -81,8 +97,9 @@
         (equal (car expr) '=))
         (append
           (comp-expr (car (cdr expr)) env)
-          (command-binary :MOVE :R0 :R1)
+          (command-unary :PUSH :R0)
           (comp-expr (car (cdr (cdr expr))) env)
+          (command-unary :POP :R1)
           (command-binary :MOVE :R0 :R2)
           (command-binary :CMP :R1 :R2)
           (command-unary
@@ -99,11 +116,11 @@
               (command-unary :LABEL if-true)))
               (gensym))
           (append
-            (comp-expr expr)
+            (comp-expr expr env)
             (command-binary :MOVE :R0 :R1)
             (command-binary :MOVE (const nil) :R2)
             (command-binary :CMP :R1 :R2)
-            (command-binary :JEQ etiq)))))
+            (command-unary :JEQ etiq)))))
     ;expr format: (condition*)
     (handle-or (expr env if-true commands)
       (if (null expr)
