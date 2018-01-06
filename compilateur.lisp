@@ -354,3 +354,23 @@
 
 (defun child-function-scope (env)
   (car (cdr (cdr (cdr env)))))
+
+(defun comp-file (file-in file-out)
+  (labels
+    ((read-stream (stream expr-list)
+      (if (listen stream)
+        (read-stream stream
+          ((lambda (expr)
+            (if (null expr)
+              expr-list
+              (append expr-list (list expr))))
+              (read stream nil)))
+        expr-list))
+    (comp-exprs (exprs commands)
+      (if (null exprs)
+        commands
+        (comp-exprs (cdr exprs) (append commands (comp-expr (car exprs) nil))))))
+    (with-open-file (os file-out :direction :output)
+      (print-object
+        (comp-exprs (with-open-file (is file-in) (read-stream is nil)) nil)
+        os))))
