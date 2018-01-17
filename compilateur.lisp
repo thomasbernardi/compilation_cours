@@ -31,14 +31,16 @@
           (defun-def expr env)
           (if (equal 'labels (car expr))
             (labels-def expr env)
-            (if (equal 'lambda (car expr))
-              (lambda-def expr env)
-              (if (equal 'cons (car expr))
-                (cons-command expr env)
-                (if (equal 'car (car expr))
-                  (car-command expr env)
-                  (if (equal 'cdr (car expr))
-                    (cdr-command expr env)
+            (if (equal 'cons (car expr))
+              (cons-command expr env)
+              (if (equal 'car (car expr))
+                (car-command expr env)
+                (if (equal 'cdr (car expr))
+                  (cdr-command expr env)
+                  (if (listp (car expr))
+                    (if (equal 'lambda (car (car expr)))
+                      (lambda-def expr env)
+                      (command-unary :INVALIDEXPR expr))
                     (function-call expr env)))))))))))
 
 (defun create-label (etiq)
@@ -95,7 +97,7 @@
       (command-unary :JMP etiq-end)
       (create-label etiq-otherwise)
       (comp-expr (car (cdr (cdr (cdr expr)))) env)
-      (create-label etiq-end))) (gensym) (gensym)))
+      (create-label etiq-end))) (gentemp) (gentemp)))
 
 ;currently jumps if NOT < > = (jumps when condition is NOT true)
 ;expr format ((< | > | =) a b) | (or expr*) | (function-call)
@@ -114,10 +116,13 @@
           (command-binary :MOVE :R0 :R2)
           (command-binary :CMP :R1 :R2)
           (command-unary
-            (case (car expr)
-              ('> :JLE)
-              ('< :JGE)
-              ('= :JNE))
+            (if (equal (car expr) '>)
+              :JLE
+              (if (equal (car expr) '<)
+                :JGE
+                (if (equal (car expr) '=)
+                  :JNE
+                  (warn "illegal comparison"))))
             etiq))
         (if (equal (car expr) 'or)
           ((lambda (if-true)
@@ -125,7 +130,7 @@
               (handle-or (cdr expr) env if-true nil)
               (command-unary :JMP etiq)
               (command-unary :LABEL if-true)))
-              (gensym))
+              (gentemp))
           (append
             (comp-expr expr env)
             (command-binary :MOVE :R0 :R1)
@@ -146,7 +151,7 @@
               (eval-expression (car expr) env next-etiq)
               (command-unary :JMP if-true)
               (command-unary :LABEL next-etiq))))
-          (gensym)))))
+          (gentemp)))))
     (eval-expression expr env etiq)))
 
 ;expr format: (operator x1 x2)
@@ -169,11 +174,13 @@
       (genargs (count args)
         (if (= count 0)
           (cons (make-env args parent-env nil) args)
-          (genargs (- count 1) (append args (list (gensym)))))))
+          (genargs (- count 1) (append args (list (gentemp)))))))
       ;params format (env . parameters)
       ((lambda (operator name end params)
         (append
-          (function-call (append (list name) (cdr expr)) parent-env)
+          (function-call
+            (append (list name) (cdr expr))
+            (add-child-function (list name) parent-env))
           (command-unary :JMP end)
           (command-unary :LABEL name)
           (param-addr (cdr (in-env (car (cdr params)) (car params))))
@@ -186,13 +193,17 @@
             nil)
           (return-command)
           (command-unary :LABEL end)))
-        (case (car expr)
-          ('+ :ADD)
-          ('- :SUB)
-          ('* :MULT)
-          ('/ :DIV))
-        (gensym)
-        (gensym)
+        (if (equal (car expr) '+)
+          :ADD
+          (if (equal (car expr) '-)
+            :SUB
+            (if (equal (car expr) '*)
+              :MULT
+              (if (equal (car expr) '/)
+              :DIV
+              (warn "given arith-op is not an arithop")))))
+        (gentemp)
+        (gentemp)
         (genargs (length (cdr expr)) nil))))
 
 
@@ -277,11 +288,11 @@
       (function-def def env)
       (command-unary :LABEL end)))
     (append
-      (list (gensym))
+      (list (gentemp))
       (cdr (car expr)))
     (cdr expr)
     env
-    (gensym)))
+    (gentemp)))
 
 ;expr format: (labels (functions) instructions)
 (defun labels-def (expr env)
@@ -339,6 +350,13 @@
       ;zero index param offsets
       (add-variable params (length (current-scope parent-env)) nil)
       (car (cdr (cdr parent-env))))))
+
+(defun add-child-function (functions env)
+  (list
+    (car env)
+    (car (cdr env))
+    (car (cdr (cdr env)))
+    (append functions (car (cdr (cdr (cdr env)))))))
 
 (defun in-env (key env)
   (assoc key (current-scope env)))
