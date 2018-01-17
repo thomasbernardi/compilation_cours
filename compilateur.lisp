@@ -86,7 +86,7 @@
     (command-binary :ADD (const offset) :R0)))
 
 (defun literal (expr env)
-  (command :MOVE expr :R0))
+  (command :MOVE (command-unary :CONST expr) :R0))
 
 ;expr format: (if (condition) then otherwise)
 (defun if-statement (expr env)
@@ -107,7 +107,9 @@
       (if (or
         (equal (car expr) '<)
         (equal (car expr) '>)
-        (equal (car expr) '=))
+        (equal (car expr) '=)
+        (equal (car expr) '<=)
+        (equal (car expr) '>=))
         (append
           (comp-expr (car (cdr expr)) env)
           (command-unary :PUSH :R0)
@@ -122,7 +124,11 @@
                 :JGE
                 (if (equal (car expr) '=)
                   :JNE
-                  (warn "illegal comparison"))))
+                  (if (equal (car expr) '<=)
+                    :JGT
+                    (if (equal (car expr) '>=)
+                      :JLT
+                      (warn "illegal comparison"))))))
             etiq))
         (if (equal (car expr) 'or)
           ((lambda (if-true)
@@ -135,7 +141,7 @@
             (comp-expr expr env)
             (command-binary :MOVE :R0 :R1)
             (command-binary :MOVE (const nil) :R2)
-            (command-binary :CMP :R1 :R2)
+            (command-binary :CMPE :R1 :R2)
             (command-unary :JEQ etiq)))))
     ;expr format: (condition*)
     (handle-or (expr env if-true commands)
@@ -221,8 +227,7 @@
             (comp-expr (car expr) env)
             (command-unary :PUSH :R0)))))
     (parent-args (count max instructions)
-      (if (< max count)
-        instructions
+      (if (< count max)
         (parent-args
           (+ 1 count)
           max
@@ -231,7 +236,8 @@
             (param-addr count)
             (command-binary :MOVE :R0 :R1)
             (command-binary :LOAD :R1 :R0)
-            (command-unary :PUSH :R0))))))
+            (command-unary :PUSH :R0)))
+          instructions)))
   ((lambda (nargs instructions)
     (append
       instructions
@@ -255,7 +261,7 @@
         (length (current-scope env))
         0))
     (if (member (car expr) (child-function-scope env))
-      (parent-args 1 (length (current-scope env)) nil)
+      (parent-args 0 (length (current-scope env)) nil)
       nil))))
 
 ;expr format: (name (params) instructions)
@@ -281,15 +287,15 @@
 
 ;expr format: ((lambda (args) instructions) params)
 (defun lambda-def (expr env)
-  ((lambda (def params env end)
-    (append
-      (function-call (append (list (car def)) params) env)
+  ;def format: ((args) instructions)
+  ((lambda (name def params env end)
+      (append
+      (function-call (append (list name) params) (add-child-function (list name) env))
       (command-unary :JMP end)
-      (function-def def env)
+      (function-def (append (list name) def) env)
       (command-unary :LABEL end)))
-    (append
-      (list (gentemp))
-      (cdr (car expr)))
+    (gentemp)
+    (cdr (car expr))
     (cdr expr)
     env
     (gentemp)))
@@ -311,9 +317,12 @@
           (cdr rest-exprs)
           env
           (append commands (comp-expr (car rest-exprs) env))))))
+    ((lambda (end)
     (append
+      (inst-exprs (cdr (cdr expr)) env nil)
+      (command-unary :JMP end)
       (fun-exprs (car (cdr expr)) env nil)
-      (inst-exprs (cdr (cdr expr)) env nil))))
+      (command-unary :LABEL end))) (gentemp))))
 
 ;expr format: (name params)
 (defun labels-function-def (expr env)
@@ -351,6 +360,8 @@
       (add-variable params (length (current-scope parent-env)) nil)
       (car (cdr (cdr parent-env))))))
 
+;a cheat because, for function-call to grab and push parent parameters, the functions
+;it is calling must be a function within its scope
 (defun add-child-function (functions env)
   (list
     (car env)
