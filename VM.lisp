@@ -346,13 +346,3 @@
       (vm-cdr vm (car (cdr instruction))))
     (:LSPFN
       (vm-lisp-function vm (car (cdr instruction))))))
-
-(defun lisp-function-call (vm function)
-  (vm-push-im vm 1)
-  (vm-push-im vm 2)
-  (vm-push-im vm 3)
-  (vm-push-im vm 4)
-  (vm-push-im vm 5)
-  (vm-push-im vm 5)
-  (set-register vm :FP 5)
-  (vm-lisp-function vm function))
