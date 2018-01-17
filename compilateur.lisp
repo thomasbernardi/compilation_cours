@@ -9,7 +9,7 @@
 (defun comp-expr (expr env)
   (if (atom expr)
     (if (constantp expr)
-      (command-binary :MOVE (list :CONST expr) :R0)
+      (literal expr)
         (if (in-env expr env)
           (append
             ;put address in :R0
@@ -41,7 +41,9 @@
                     (if (equal 'lambda (car (car expr)))
                       (lambda-def expr env)
                       (command-unary :INVALIDEXPR expr))
-                    (function-call expr env)))))))))))
+                    (if (equal 'QUOTE (car expr))
+                      (literal (car (cdr expr)))
+                      (function-call expr env))))))))))))
 
 (defun create-label (etiq)
   (list (append (list :LABEL) (list etiq))))
@@ -61,17 +63,17 @@
 ;expr format: (car sous-expr)
 (defun car-command (expr env)
   (append
-    (comp-expr (cdr expr) env)
+    (comp-expr (car (cdr expr)) env)
     (command-unary :CAR :R0)))
 
 (defun cdr-command (expr env)
   (append
-    (comp-expr (cdr expr) env)
+    (comp-expr (car (cdr expr)) env)
     (command-unary :CDR :R0)))
 
 (defun cons-command (expr env)
   (append
-    (comp-expr (cdr expr) env)
+    (comp-expr (car (cdr expr)) env)
     (command-unary :PUSH :R0)
     (comp-expr (cdr (cdr expr)) env)
     (command-unary :POP :R1)
@@ -85,8 +87,8 @@
     (command-binary :SUB :R5 :R0)
     (command-binary :ADD (const offset) :R0)))
 
-(defun literal (expr env)
-  (command :MOVE (command-unary :CONST expr) :R0))
+(defun literal (expr)
+  (command-binary :MOVE (const expr) :R0))
 
 ;expr format: (if (condition) then otherwise)
 (defun if-statement (expr env)
