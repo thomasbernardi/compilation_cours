@@ -8,8 +8,9 @@
       (if (null rest-args)
         nil
         (progn
-          (push-im vm (car rest-args))
-          (next-arg (cdr expr))))))
+          (print rest-args)
+          (vm-push-im vm (car rest-args))
+          (next-arg (cdr rest-args))))))
   ((lambda (nargs)
     (progn
       (next-arg args)
@@ -29,8 +30,14 @@
       ;(command-unary :PUSH :R2)
       (vm-push vm :R1)
       ;(command-unary :PUSH :R1)
-      (vm-jump-return (gethash name (get vm :label-table)))
+      (move vm :SP :R1)
+      (vm-push-im vm (list :HALT))
+      (vm-push vm :R1)
+      (vm-jump vm (car (gethash name (get vm :label-table))))
+      (vm-run vm)
+      (print (get-register vm :PC))
       ;(command-unary :JSR (car expr))
+      (vm-pop vm :R1)
       (vm-pop vm :R1)
       ;(command-unary :POP :R1)
       (vm-pop vm :R2)
@@ -68,7 +75,7 @@
         (warn "your instruction was null when it shouldn't have been, shame on you")
         (set-memory vm counter ((lambda (name instruction)
           (if (or
-            (equal name :JPG)
+            (equal name :JGT)
             (equal name :JEQ)
             (equal name :JLT)
             (equal name :JGE)
@@ -87,8 +94,9 @@
         (if (equal (car instruction) :LABEL)
           (if (gethash (car (cdr instruction)) (get vm :label-table))
             (warn "you defined a label twice you dimwit")
-            (setf (gethash (car (cdr instruction)) (get vm :label-table))
-              (cons counter nil))))))
+              (setf (gethash (car (cdr instruction)) (get vm :label-table))
+                (cons counter nil))
+            ))))
       (progn
         (read-instructions instructions (+ 1 (get-register vm :SP)) #'set-label)
         (set-register vm :SP
@@ -107,7 +115,7 @@
   (setf (aref (get vm :memory) address) value))
 
 (defun move (vm from to)
-  (set-register to (get-register vm from)))
+  (set-register vm to (get-register vm from)))
 
 (defun move-im (vm value to)
   (set-register vm to value))
@@ -176,14 +184,16 @@
   (set-register vm :PC label))
 
 (defun vm-jump-return (vm label)
-  (vm-push vm (+ 1 (get-register vm :PC)))
-  (jump vm label))
+  (vm-push vm :PC)
+  (vm-jump vm label))
 
 (defun vm-return (vm)
   ((lambda (address)
     (set-register vm :PC address)
-    (jump vm address))
-    (vm-pop vm)))
+    (vm-jump vm address))
+    (progn
+      (vm-pop vm :INTERNAL)
+      (get-register vm :INTERNAL))))
 
 (defun vm-lisp-function (vm name)
   (labels (
@@ -191,17 +201,23 @@
       (if (< 0 remaining)
         (add-argument (append parameters (list (get-memory vm
             (- (get-register vm :FP) remaining)))) (- remaining 1))
-        parameters
+        (progn parameters (print "params") (print parameters))
       )))
       (set-register vm :R0 (apply name (add-argument nil (get-memory vm (get-register vm :FP)))))))
 
 (defun vm-compare (vm left right)
   (vm-compare-im vm (get-register vm left) right))
 
+(defun vm-compare-equality (vm left right)
+  ((lambda (left-value right-value)
+    (set-register vm :FEQ (equal left-value right-value)))
+    (get-register vm left)
+    (get-register vm right)))
+
 (defun vm-compare-im (vm value right)
   ((lambda (left-value right-value)
     (set-register vm :FLT (< left-value right-value))
-    (set-register vm :FEQ (or (= left-value right-value) (equal left-value right-value)))
+    (set-register vm :FEQ (= left-value right-value))
     (set-register vm :FGT (> left-value right-value)))
   value
   (get-register vm right)))
@@ -233,9 +249,13 @@
 (defun vm-run (vm)
   (setf halt? nil)
   (loop while (not halt?) do
-    (increment vm :PC)
+    (print (get-register vm :SP))
+    (print (get-register vm :PC))
+    (print (get-register vm :FP))
+    (print (get-memory vm (get-register vm :FP)))
     (print (get-memory vm (get-register vm :PC)))
-    (vm-run-instruction vm (get-memory vm (get-register vm :PC)))))
+    (vm-run-instruction vm (get-memory vm (get-register vm :PC)))
+    (increment vm :PC)))
 
 (defun vm-run-instruction (vm instruction)
   (case (car instruction)
@@ -292,7 +312,9 @@
         (if (equal (car (car (cdr instruction))) :CONST)
           (vm-compare-im vm (car (cdr (car (cdr instruction)))) (car (cdr (cdr instruction))))
           (warn "incompatible type for comparison operation"))))
-    (:JPG
+    (:CMPE
+      (vm-compare-equality vm (car (cdr instruction)) (car (cdr (cdr instruction)))))
+    (:JGT
       (vm-jump-gt vm (car (cdr instruction))))
     (:JEQ
       (vm-jump-eq vm (car (cdr instruction))))
@@ -312,6 +334,8 @@
       (vm-return vm))
     (:NOP
       nil)
+    (:LABEL
+      nil)
     (:HALT
       (setf halt? T))
     (:CONS
@@ -319,7 +343,9 @@
     (:CAR
       (vm-car vm (car (cdr instruction))))
     (:CDR
-      (vm-cdr vm (car (cdr instruction))))))
+      (vm-cdr vm (car (cdr instruction))))
+    (:LSPFN
+      (vm-lisp-function vm (car (cdr instruction))))))
 
 (defun lisp-function-call (vm function)
   (vm-push-im vm 1)
