@@ -217,6 +217,7 @@
 
 ;for lambda/labels, add different way to move parameters from old frame to new frame
 ;expr format: (name . (args))
+;env--env of calling function
 (defun function-call (expr env)
   (labels
     ((next-arg (expr instructions)
@@ -283,7 +284,7 @@
         (command-unary :LABEL (car expr)))
       (return-command))))
 
-;expr format (defun name params)
+;expr format (defun name (params) instructions)
 (defun defun-def (expr env)
   (function-def (cdr expr) env))
 
@@ -326,7 +327,7 @@
       (fun-exprs (car (cdr expr)) env nil)
       (command-unary :LABEL end))) (gentemp))))
 
-;expr format: (name params)
+;expr format: (name (params) instructions)
 (defun labels-function-def (expr env)
   (function-def expr env))
 
@@ -386,6 +387,14 @@
 (defun child-function-scope (env)
   (car (cdr (cdr (cdr env)))))
 
+(defun compile-expressions (exprs commands)
+  (labels
+    ((comp-exprs (exprs commands)
+      (if (null exprs)
+        commands
+        (comp-exprs (cdr exprs) (append commands (comp-expr (car exprs) nil))))))
+    (comp-exprs exprs nil)))
+
 (defun comp-file (file-in file-out)
   (labels
     ((read-stream (stream expr-list)
@@ -396,12 +405,8 @@
               expr-list
               (append expr-list (list expr))))
               (read stream nil)))
-        expr-list))
-    (comp-exprs (exprs commands)
-      (if (null exprs)
-        commands
-        (comp-exprs (cdr exprs) (append commands (comp-expr (car exprs) nil))))))
+        expr-list)))
     (with-open-file (os file-out :direction :output)
       (print-object
-        (comp-exprs (with-open-file (is file-in) (read-stream is nil)) nil)
+        (compile-expressions (with-open-file (is file-in) (read-stream is nil)))
         os))))
