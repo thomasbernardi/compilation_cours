@@ -163,44 +163,33 @@
     (eval-expression expr env etiq)))
 
 ;expr format: (operator x1 x2)
-(defun arith-op (expr parent-env)
+(defun arith-op (expr env)
   (labels
-    ((extra-operands (operands operator env commands)
+    ((extra-operands (operands operator commands)
       (if (null operands)
         commands
         (extra-operands
           (cdr operands)
           operator
-          env
           (append
             commands
-            (command-binary :MOVE :R0 :R2)
-            (param-addr (cdr (in-env (car operands) env)))
-            (command-binary :LOAD :R0 :R1)
-            (command-binary :MOVE :R2 :R0)
-            (command-binary operator :R1 :R0)))))
-      (genargs (count args)
-        (if (= count 0)
-          (cons (make-env args parent-env nil nil) args)
-          (genargs (- count 1) (append args (list (gentemp)))))))
+            (command-unary :PUSH :R0)
+            ;(command-binary :MOVE :R0 :R2)
+            (comp-expr (car operands) env)
+            ;(param-addr (cdr (in-env (car operands) env)))
+            (command-binary :MOVE :R0 :R1)
+            (command-unary :POP :R0)
+            ;(command-binary :LOAD :R0 :R1)
+            ;(command-binary :MOVE :R2 :R0)
+            (command-binary operator :R1 :R0))))))
       ;params format (env . parameters)
-      ((lambda (operator name end params)
+      ((lambda (operator)
         (append
-          (function-call
-            (append (list name) (cdr expr))
-            (add-child-function (list name) parent-env))
-          (command-unary :JMP end)
-          (command-unary :LABEL name)
-          (param-addr (cdr (in-env (car (cdr params)) (car params))))
-          (command-binary :MOVE :R0 :R1)
-          (command-binary :LOAD :R1 :R0)
+          (comp-expr (car (cdr expr)) env)
           (extra-operands
-            (cdr (cdr params))
+            (cdr (cdr expr))
             operator
-            (car params)
-            nil)
-          (return-command)
-          (command-unary :LABEL end)))
+            nil)))
         (if (equal (car expr) '+)
           :ADD
           (if (equal (car expr) '-)
@@ -209,10 +198,7 @@
               :MULT
               (if (equal (car expr) '/)
               :DIV
-              (warn "given arith-op is not an arithop")))))
-        (gentemp)
-        (gentemp)
-        (genargs (length (cdr expr)) nil))))
+              (warn "given arith-op is not an arithop"))))))))
 
 
 ;for lambda/labels, add different way to move parameters from old frame to new frame
