@@ -181,7 +181,7 @@
             (command-binary operator :R1 :R0)))))
       (genargs (count args)
         (if (= count 0)
-          (cons (make-env args parent-env nil) args)
+          (cons (make-env args parent-env nil nil) args)
           (genargs (- count 1) (append args (list (gentemp)))))))
       ;params format (env . parameters)
       ((lambda (operator name end params)
@@ -241,7 +241,7 @@
             (command-binary :LOAD :R1 :R0)
             (command-unary :PUSH :R0)))
           instructions)))
-  ((lambda (nargs instructions)
+  (progn (print env) ((lambda (nargs instructions)
     (append
       instructions
       (next-arg (cdr expr) nil)
@@ -261,11 +261,15 @@
     (+
       (length (cdr expr))
       (if (member (car expr) (child-function-scope env))
-        (length (current-scope env))
+        (if (member (current-scope-name env) (child-function-scope env))
+          (length (parent-scope env))
+          (length (current-scope env)))
         0))
     (if (member (car expr) (child-function-scope env))
-      (parent-args 0 (length (current-scope env)) nil)
-      nil))))
+      (if (member (current-scope-name env) (child-function-scope env))
+        (parent-args 0 (length (parent-scope env)) nil)
+        (parent-args 0 (length (current-scope env)) nil))
+      nil)))))
 
 ;expr format: (name (params) instructions)
 (defun function-def (expr env)
@@ -277,12 +281,12 @@
           (cdr rest-exprs)
           env
           (append commands (comp-expr (car rest-exprs) env))))))
-    (append
+    (progn (print (car expr))(append
       (next-expr
         (cdr (cdr expr))
-        (make-env (car (cdr expr)) env (cdr (cdr expr)))
+        (make-env (car (cdr expr)) env (cdr (cdr expr)) (car expr))
         (command-unary :LABEL (car expr)))
-      (return-command))))
+      (return-command)))))
 
 ;expr format (defun name (params) instructions)
 (defun defun-def (expr env)
@@ -331,8 +335,8 @@
 (defun labels-function-def (expr env)
   (function-def expr env))
 
-;((child-assoc-list) (parent-assoc-list) (current-assoc-list) (child-functions-list))
-(defun make-env (params parent-env instructions)
+;((child-assoc-list) (parent-assoc-list) (current-assoc-list) (child-functions-list) this-funname)
+(defun make-env (params parent-env instructions fun-name)
   (labels
     ((add-variable (rest-params count env)
       (if (null rest-params)
@@ -358,7 +362,12 @@
             (append functions (add-functions (car (cdr (car rest-instructions))) nil))
             functions)))))
     ((lambda (current parent)
-      (list current parent (append current parent) (child-functions instructions nil)))
+      (list
+        current
+        parent
+        (append current parent)
+        (append (child-function-scope parent-env) (child-functions instructions nil))
+        fun-name))
       ;zero index param offsets
       (add-variable params (length (current-scope parent-env)) nil)
       (car (cdr (cdr parent-env))))))
@@ -367,10 +376,11 @@
 ;it is calling must be a function within its scope
 (defun add-child-function (functions env)
   (list
-    (car env)
-    (car (cdr env))
-    (car (cdr (cdr env)))
-    (append functions (car (cdr (cdr (cdr env)))))))
+    (child-scope env)
+    (parent-scope env)
+    (current-scope env)
+    (append functions (child-function-scope env))
+    (current-scope-name env)))
 
 (defun in-env (key env)
   (assoc key (current-scope env)))
@@ -387,7 +397,10 @@
 (defun child-function-scope (env)
   (car (cdr (cdr (cdr env)))))
 
-(defun compile-expressions (exprs commands)
+(defun current-scope-name (env)
+  (car (cdr (cdr (cdr (cdr env))))))
+
+(defun compile-expressions (exprs)
   (labels
     ((comp-exprs (exprs commands)
       (if (null exprs)
