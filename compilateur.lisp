@@ -227,7 +227,7 @@
             (command-binary :LOAD :R1 :R0)
             (command-unary :PUSH :R0)))
           instructions)))
-  (progn (print env) ((lambda (nargs instructions)
+  ((lambda (nargs instructions)
     (append
       instructions
       (next-arg (cdr expr) nil)
@@ -255,7 +255,7 @@
       (if (member (current-scope-name env) (child-function-scope env))
         (parent-args 0 (length (parent-scope env)) nil)
         (parent-args 0 (length (current-scope env)) nil))
-      nil)))))
+      nil))))
 
 ;expr format: (name (params) instructions)
 (defun function-def (expr env)
@@ -267,12 +267,12 @@
           (cdr rest-exprs)
           env
           (append commands (comp-expr (car rest-exprs) env))))))
-    (progn (print (car expr))(append
+          (append
       (next-expr
         (cdr (cdr expr))
         (make-env (car (cdr expr)) env (cdr (cdr expr)) (car expr))
         (command-unary :LABEL (car expr)))
-      (return-command)))))
+      (return-command))))
 
 ;expr format (defun name (params) instructions)
 (defun defun-def (expr env)
@@ -283,10 +283,10 @@
   ;def format: ((args) instructions)
   ((lambda (name def params env end)
       (append
-      (function-call (append (list name) params) (add-child-function (list name) env))
-      (command-unary :JMP end)
-      (function-def (append (list name) def) env)
-      (command-unary :LABEL end)))
+        (function-call (append (list name) params) (add-child-function (list name) env))
+        (command-unary :JMP end)
+        (function-def (append (list name) def) (add-child-function (list name) env))
+        (command-unary :LABEL end)))
     (gentemp)
     (cdr (car expr))
     (cdr expr)
@@ -342,10 +342,10 @@
         functions
         (child-functions
           (cdr instructions)
-          (if (and
-              (listp (car rest-instructions))
-              (equal (car (car rest-instructions)) 'labels))
-            (append functions (add-functions (car (cdr (car rest-instructions))) nil))
+          (if (listp (car rest-instructions))
+            (if (equal (car (car rest-instructions)) 'labels)
+              (append functions (add-functions (car (cdr (car rest-instructions))) nil))
+              functions)
             functions)))))
     ((lambda (current parent)
       (list
