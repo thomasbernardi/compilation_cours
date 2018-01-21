@@ -7,6 +7,9 @@
 
 ;@returns a list of commands
 (defun comp-expr (expr env)
+  ; (print "comp-expr")
+  ; (print expr)
+  ; (print env)
   (if (atom expr)
     (if (constantp expr)
       (literal expr)
@@ -227,6 +230,13 @@
             (command-binary :LOAD :R1 :R0)
             (command-unary :PUSH :R0)))
           instructions)))
+  ; (print "function-call")
+  ; (print (car expr))
+  ; (print (cdr expr))
+  ; (print env)
+  ; (print (get-function-env (car expr) env))
+  ; (print (function-carryover (car expr) env))
+  ; (print (current-vars env))
   ((lambda (nargs instructions)
     (append
       instructions
@@ -244,17 +254,13 @@
       (command-unary :POP :R2)
       (command-binary :MOVE :R1 :FP)
       (command-binary :MOVE :R2 :SP)))
-    (+
-      (length (cdr expr))
-      (if (member (car expr) (child-function-scope env))
-        (if (member (current-scope-name env) (child-function-scope env))
-          (length (parent-scope env))
-          (length (current-scope env)))
-        0))
-    (if (member (car expr) (child-function-scope env))
-      (if (member (current-scope-name env) (child-function-scope env))
-        (parent-args 0 (length (parent-scope env)) nil)
-        (parent-args 0 (length (current-scope env)) nil))
+    (if (get-function-env (car expr) env)
+      (+
+        (function-carryover (car expr) env)
+        (length (cdr expr)))
+      (length (cdr expr)))
+    (if (get-function-env (car expr) env)
+      (parent-args 0 (function-carryover (car expr) env) nil)
       nil))))
 
 ;expr format: (name (params) instructions)
@@ -270,7 +276,16 @@
           (append
       (next-expr
         (cdr (cdr expr))
-        (make-env (car (cdr expr)) env (cdr (cdr expr)) (car expr))
+        ; (progn
+        ;   (print "result of make-env")
+        ;   (print (car expr))
+        ;   (print (car (cdr expr)))
+        ;   (print (cdr (cdr expr)))
+        ;   (print env)
+        ;   (print (make-env (car expr) (car (cdr expr)) (cdr (cdr expr)) env))
+          (make-env (car expr) (car (cdr expr)) (cdr (cdr expr)) env)
+          ;)
+
         (command-unary :LABEL (car expr)))
       (return-command))))
 
@@ -283,9 +298,11 @@
   ;def format: ((args) instructions)
   ((lambda (name def params env end)
       (append
-        (function-call (append (list name) params) (add-child-function (list name) env))
+        (function-call
+          (append (list name) params)
+          (add-function-env name params (length (current-vars env)) env))
         (command-unary :JMP end)
-        (function-def (append (list name) def) (add-child-function (list name) env))
+        (function-def (append (list name) def) env)
         (command-unary :LABEL end)))
     (gentemp)
     (cdr (car expr))
@@ -321,70 +338,104 @@
 (defun labels-function-def (expr env)
   (function-def expr env))
 
-;((child-assoc-list) (parent-assoc-list) (current-assoc-list) (child-functions-list) this-funname)
-(defun make-env (params parent-env instructions fun-name)
+(defun add-function-env (name params rollover env)
   (labels
-    ((add-variable (rest-params count env)
+    ((add-variables (rest-params count vars-to-offsets rollover)
       (if (null rest-params)
-        env
+        (list vars-to-offsets rollover)
+        (add-variables
+          (cdr rest-params)
+          (+ 1 count)
+          (acons (car rest-params) count vars-to-offsets)
+          rollover))))
+      (list
+        (acons
+          name
+          (add-variables params rollover (current-vars env) rollover)
+          (function-envs env))
+        (current-env env))))
+;((assoc-list fun-name --> env) current env)
+;env : ((assoc-list vars --> offsets) num-to-copy)
+(defun make-env (name params instructions env)
+  (labels
+    ((add-variable (rest-params count vars-to-offsets rollover)
+      (if (null rest-params)
+        (list vars-to-offsets rollover)
         (add-variable
           (cdr rest-params)
           (+ 1 count)
-          (acons (car rest-params) count env))))
-    (add-functions (labels-def functions)
-      (if (null labels-def)
-        functions
-        (add-functions
-          (cdr labels-def)
-          (append functions (list (car (car labels-def)))))))
-    (child-functions (rest-instructions functions)
-      (if (null rest-instructions)
-        functions
-        (child-functions
-          (cdr instructions)
-          (if (listp (car rest-instructions))
-            (if (equal (car (car rest-instructions)) 'labels)
-              (append functions (add-functions (car (cdr (car rest-instructions))) nil))
-              functions)
-            functions)))))
-    ((lambda (current parent)
-      (list
-        current
-        parent
-        (append current parent)
-        (append (child-function-scope parent-env) (child-functions instructions nil))
-        fun-name))
-      ;zero index param offsets
-      (add-variable params (length (current-scope parent-env)) nil)
-      (car (cdr (cdr parent-env))))))
+          (acons (car rest-params) count vars-to-offsets)
+          rollover)))
+      (label-functions (rest-exprs env)
+        (if (null rest-exprs)
+          env
+          (label-functions
+            (cdr rest-exprs)
+            (add-function-env
+              (car (car rest-exprs))
+              (car (cdr (car rest-exprs)))
+              (length params)
+              env))))
+      (find-label-def (rest-exprs env)
+        (if (null rest-exprs)
+          env
+          (if (listp (car rest-exprs))
+            (if (equal (car (car rest-exprs)) 'labels)
+              (find-label-def
+                (cdr rest-exprs)
+                (label-functions
+                  (car (cdr (car rest-exprs)))
+                  env))
+                (find-label-def
+                  (cdr rest-exprs)
+                  env))
+            env))))
+      ; (print "make-env")
+      ; (print name)
+      ; (print params)
+      ; (print instructions)
+      ; (print env)
+      (if (get-function-env name env)
+        (list (function-envs env) (cdr (get-function-env name env)))
+        ((lambda (this-env)
+            (find-label-def
+              instructions
+              (list (acons name this-env (function-envs env)) this-env)))
+        (add-variable
+          params
+          (length (current-vars env))
+          (current-vars env)
+          (length (current-vars env)))))))
 
-;a cheat because, for function-call to grab and push parent parameters, the functions
-;it is calling must be a function within its scope
-(defun add-child-function (functions env)
-  (list
-    (child-scope env)
-    (parent-scope env)
-    (current-scope env)
-    (append functions (child-function-scope env))
-    (current-scope-name env)))
+;returns assoc-list of current scope
+(defun current-vars (env)
+  (car (car (cdr env))))
 
-(defun in-env (key env)
-  (assoc key (current-scope env)))
+(defun current-carryover (env)
+  (car (cdr (car (cdr env)))))
 
-(defun parent-scope (env)
+(defun current-env (env)
   (car (cdr env)))
 
-(defun child-scope (env)
+(defun function-envs (env)
   (car env))
 
-(defun current-scope (env)
-  (car (cdr (cdr env))))
+(defun get-function-env (name env)
+  ;(progn
+    ; (print "assoc")
+    ; (print name)
+    ; (print env)
+    (assoc name (car env)))
+    ;)
 
-(defun child-function-scope (env)
-  (car (cdr (cdr (cdr env)))))
+(defun function-vars (name env)
+  (car (cdr (get-function-env name env))))
 
-(defun current-scope-name (env)
-  (car (cdr (cdr (cdr (cdr env))))))
+(defun function-carryover (name env)
+  (car (cdr (cdr (get-function-env name env)))))
+
+(defun in-env (key env)
+  (assoc key (current-vars env)))
 
 (defun compile-expressions (exprs)
   (labels

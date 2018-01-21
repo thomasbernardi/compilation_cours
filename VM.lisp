@@ -249,11 +249,15 @@
 (defun vm-run (vm)
   (setf halt? nil)
   (loop while (not halt?) do
-    (print (get-register vm :SP))
-    (print (get-register vm :PC))
-    (print (get-register vm :FP))
-    (print (get-memory vm (get-register vm :FP)))
-    (print (get-memory vm (get-register vm :PC)))
+    ;(print (get-register vm :SP))
+    ;(print (get-register vm :PC))
+    ;(print (get-register vm :FP))
+    ;(print (get-memory vm (get-register vm :FP)))
+    ;(print (get-memory vm (get-register vm :PC)))
+    (if (or
+      (equal (car (get-memory vm (get-register vm :PC))) :JSR)
+      (equal (car (get-memory vm (get-register vm :PC))) :LSPFN))
+      (print (get-memory vm (get-register vm :PC))))
     (vm-run-instruction vm (get-memory vm (get-register vm :PC)))
     (increment vm :PC)))
 
